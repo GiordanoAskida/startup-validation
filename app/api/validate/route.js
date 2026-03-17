@@ -8,9 +8,22 @@ PROFILO FOUNDER:
 `;
 
 export async function POST(req) {
-  const { idea } = await req.json();
+  try {
+    const { idea, history, question } = await req.json();
 
-  const prompt = `Sei un CTO esperto di architetture AI-first e cloud per startup solo-founder.
+    const isChat = !!question;
+
+    let messages;
+    if (isChat) {
+      const systemContext = `Sei un CTO esperto di architetture AI-first per startup solo-founder.\n${FOUNDER_PROFILE}\nL'utente ha già ricevuto questa analisi tecnica:\n${idea}\nRispondi in modo conciso e pratico alle domande di follow-up.`;
+      messages = [
+        { role: "user", content: systemContext },
+        { role: "assistant", content: "Perfetto, sono pronto a rispondere alle tue domande sull'analisi tecnica." },
+        ...(history || []),
+        { role: "user", content: question },
+      ];
+    } else {
+      const prompt = `Sei un CTO esperto di architetture AI-first e cloud per startup solo-founder.
 
 ${FOUNDER_PROFILE}
 
@@ -30,7 +43,7 @@ TOOL_AI:
 
 TOOL_CLOUD:
 - [Nome servizio]: [Uso specifico] | Costo: [€/mese stimato]
-- [ripeti per ogni servizio necessario, es. storage S3, database, hosting, CDN, email, ecc.]
+- [ripeti per ogni servizio necessario]
 
 COSTO_TOTALE_MESE: [€XX-XX/mese a regime con 100 utenti attivi]
 COSTO_MVP_FASE: [€XX/mese per i primi 3 mesi con 0-10 utenti test]
@@ -43,7 +56,7 @@ HUMAN_IN_LOOP:
 - [Dove e quando il founder deve intervenire manualmente, con frequenza stimata]
 - [ripeti per ogni intervento]
 
-ARCHITETTURA_CONSIGLIATA: [Descrizione in 3-4 frasi dello stack tecnico ottimale: quali agenti AI, come si collegano, quale cloud, flusso dati principale]
+ARCHITETTURA_CONSIGLIATA: [Descrizione in 3-4 frasi dello stack tecnico ottimale]
 
 PROSSIMI_PASSI_TECNICI:
 1. [Prima cosa da fare tecnicamente, questa settimana]
@@ -52,25 +65,37 @@ PROSSIMI_PASSI_TECNICI:
 
 Sii specifico con i prezzi reali (usa listini pubblici 2024-2025). No ottimismo, no vaghezze.`;
 
-  const anthropicResp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2000,
-      stream: true,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
+      messages = [{ role: "user", content: prompt }];
+    }
 
-  return new Response(anthropicResp.body, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-    },
-  });
+    const anthropicResp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2000,
+        stream: true,
+        messages,
+      }),
+    });
+
+    if (!anthropicResp.ok) {
+      const err = await anthropicResp.text();
+      return new Response(JSON.stringify({ error: err }), { status: 500, headers: { "Content-Type": "application/json" } });
+    }
+
+    return new Response(anthropicResp.body, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+      },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+  }
 }
